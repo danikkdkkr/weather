@@ -87,6 +87,83 @@ class Params():
 
 
 
+class WeatherStation:
+    """A weather station defined by lat/lon.  Optionally uses a known Meteostat station ID."""
+
+    def __init__(self, lat: float, lon: float, station_id: str = None):
+        self.lat = lat
+        self.lon = lon
+        self.station_id = station_id  # None → virtual interpolated Point; str → actual station
+
+    def fetch(self, start, end) -> pd.DataFrame:
+        loc = self.station_id if self.station_id is not None else Point(self.lat, self.lon)
+        return pd.DataFrame(Daily(loc, start, end).fetch())
+
+    def __repr__(self):
+        return f"WeatherStation(id={self.station_id!r}, lat={self.lat:.4f}, lon={self.lon:.4f})"
+
+
+def find_stations(center: "WeatherStation", radius_km: float) -> pd.DataFrame:
+    """Return a DataFrame of Meteostat stations within radius_km of center.
+
+    Index is the Meteostat station ID; columns include latitude, longitude, name, distance.
+    Results are sorted by distance (nearest first).
+    """
+    return Stations().nearby(center.lat, center.lon, int(radius_km * 1000)).fetch()
+
+
+def process_station_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-station feature engineering: wdir → sin/cos, snow NaN → 0, drop NaN rows."""
+    df = df.copy()
+    df["snow"] = df["snow"].fillna(0)
+    df["wdir_sin"] = np.sin(np.deg2rad(df["wdir"]))
+    df["wdir_cos"] = np.cos(np.deg2rad(df["wdir"]))
+    df = df.drop(columns=["wdir"])
+    df = df.dropna()
+    return df
+
+
+# Fixed column order for the primary (target) station — must match SequenceDataset [:11] slice
+_PRIMARY_COL_ORDER = [
+    "tavg", "tmin", "tmax", "prcp", "snow",
+    "wdir_sin", "wdir_cos", "wspd", "wpgt", "pres", "tsun",
+]
+
+
+def fetch_multi_station_data(
+    primary: WeatherStation,
+    aux_stations: list,
+    start,
+    end,
+) -> pd.DataFrame:
+    """Fetch and merge data from primary + auxiliary stations into one DataFrame.
+
+    Primary station columns are unprefixed and ordered per _PRIMARY_COL_ORDER so that
+    SequenceDataset's [:11] target slice and target_cols remain correct.
+    Auxiliary station columns are prefixed s1_, s2_, ...
+    day_sin / day_cos are appended once after the join.
+    """
+    primary_df = primary.fetch(start, end)
+    primary_df.index = pd.to_datetime(primary_df.index)
+    primary_df = process_station_df(primary_df)[_PRIMARY_COL_ORDER]
+
+    combined = primary_df.copy()
+
+    for i, station in enumerate(aux_stations, start=1):
+        raw = station.fetch(start, end)
+        if raw.empty:
+            continue
+        raw.index = pd.to_datetime(raw.index)
+        processed = process_station_df(raw).add_prefix(f"s{i}_")
+        combined = combined.join(processed, how="inner")
+
+    doy = combined.index.dayofyear
+    combined["day_sin"] = np.sin(2 * np.pi * doy / 365)
+    combined["day_cos"] = np.cos(2 * np.pi * doy / 365)
+
+    return combined
+
+
 def get_stationdata(pos, start, end):
     location = Point(*pos)
     data = Daily(location, start, end).fetch()
@@ -108,18 +185,34 @@ def handle_data(df):
     return df
 
 def normalize(df):
-    #normalize values
-    # Columns already in [-1, 1]
-    skip_cols = ["day_sin", "day_cos", "wdir_sin", "wdir_cos"]
-    # Select columns to scale
+    # Auto-detect all sin/cos columns (already in [-1, 1]); handles multi-station prefixes too
+    skip_cols = [c for c in df.columns if c.endswith("_sin") or c.endswith("_cos")]
     cols_to_scale = [c for c in df.columns if c not in skip_cols]
-    # Create a copy so we don’t modify the original DataFrame
     df_scaled = df.copy()
-    # Fit-transform only the selected columns
     scaler = MinMaxScaler(feature_range=(-1, 1))
     df_scaled[cols_to_scale] = scaler.fit_transform(df[cols_to_scale])
     joblib.dump(scaler, "scaler.pkl")
     return df_scaled, scaler
+
+
+def inverse_transform_cols(scaler, df_subset: pd.DataFrame) -> pd.DataFrame:
+    """Inverse-transform a subset of columns from a scaler fitted on more features.
+
+    MinMaxScaler.inverse_transform() requires exactly n_features_in_ columns.
+    When only target columns need inverting (e.g. after multi-station training where
+    the scaler knows many more features), this function uses the stored per-column
+    min_/scale_ attributes directly:
+
+        X_orig = (X_scaled - scaler.min_[i]) / scaler.scale_[i]
+    """
+    fitted_cols = list(scaler.feature_names_in_)
+    result = df_subset.copy()
+    for col in df_subset.columns:
+        if col not in fitted_cols:
+            continue  # already in natural units (sin/cos columns); leave as-is
+        idx = fitted_cols.index(col)
+        result[col] = (df_subset[col].to_numpy() - scaler.min_[idx]) / scaler.scale_[idx]
+    return result
 
 def train_test_split(split, df_scaled):
     train_size = int(len(df_scaled) * split)
@@ -218,15 +311,9 @@ def predict_and_compare(best_model, scaler, target_cols, params, test_loader):
     pred_scaled_part = pred_df[[c for c in target_cols if c in scaled_cols]].copy()
     true_scaled_part = true_df[[c for c in target_cols if c in scaled_cols]].copy()
 
-    # Inverse-transform only the scaled subset
-    inv_pred_scaled = pd.DataFrame(
-        scaler.inverse_transform(pred_scaled_part),
-        columns=pred_scaled_part.columns
-    )
-    inv_true_scaled = pd.DataFrame(
-        scaler.inverse_transform(true_scaled_part),
-        columns=true_scaled_part.columns
-    )
+    # Inverse-transform only the scaled subset (scaler may be fitted on more columns)
+    inv_pred_scaled = inverse_transform_cols(scaler, pred_scaled_part)
+    inv_true_scaled = inverse_transform_cols(scaler, true_scaled_part)
 
     # Merge back with the unscaled columns (keep them as-is)
     inv_pred = pred_df.copy()
@@ -279,8 +366,8 @@ def main(params_list):
 
 
     # --- Training parameters ---
-    max_epochs = 1000
-    patience = 30
+    max_epochs = 5 if SANITY_TEST else 1000
+    patience = 3 if SANITY_TEST else 30
     loss = train(max_epochs, patience, train_loader, test_loader, model, criterion, optimizer, params)
     best_model = LSTMModel(
         input_dim=n_features,
@@ -295,18 +382,38 @@ def main(params_list):
     predict_and_compare(best_model, scaler, target_cols, params, test_loader)
     return loss, best_model
 
-pos = (48.78, 9.18)
+STUTTGART = WeatherStation(lat=48.78, lon=9.18)
+RADIUS_KM = 50  # adjust to include more/fewer auxiliary stations
+
 start = datetime(1970, 1, 1)
 end = datetime(2024, 12, 31)
-df = get_stationdata(pos, start, end)
-df = handle_data(df)
+
+nearby_df = find_stations(STUTTGART, RADIUS_KM)
+# Skip row 0 (nearest station = Stuttgart itself); take up to 5 auxiliaries
+aux_stations = [
+    WeatherStation(lat=row.latitude, lon=row.longitude, station_id=sid)
+    for sid, row in nearby_df.iloc[1:6].iterrows()
+]
+
+df = fetch_multi_station_data(STUTTGART, aux_stations, start, end)
+print(f"Dataset: {len(df)} days, {df.shape[1]} features ({1 + len(aux_stations)} stations)")
 df_scaled, scaler = normalize(df)
 
+# Set SANITY_TEST=True for a quick smoke test (2 configs, 5 epochs each).
+# Set SANITY_TEST=False for the full 360-config hyperparameter search.
+SANITY_TEST = True
+
 #load hyperparameters
-hidden_dims = [20, 32, 48, 64, 84, 128]
-num_layerss  = [1, 2, 3, 4 ,5]
-lrs = [5e-4, 1e-3, 2e-3]
-dropouts = [0.0, 0.1, 0.2, 0.3]
+if SANITY_TEST:
+    hidden_dims = [32]
+    num_layerss  = [1]
+    lrs = [1e-3]
+    dropouts = [0.0, 0.1]
+else:
+    hidden_dims = [20, 32, 48, 64, 84, 128]
+    num_layerss  = [1, 2, 3, 4 ,5]
+    lrs = [5e-4, 1e-3, 2e-3]
+    dropouts = [0.0, 0.1, 0.2, 0.3]
 param_perms = perms(hidden_dims, num_layerss, lrs, dropouts)
 seq_len = 30
 horizon = 3
