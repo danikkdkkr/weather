@@ -23,10 +23,20 @@ def process_station_df(df: pd.DataFrame) -> pd.DataFrame:
     """Per-station feature engineering: wdir -> sin/cos, snow NaN -> 0, drop NaN rows."""
     df = df.copy()
     df["snow"] = df["snow"].fillna(0)
-    df["wdir_sin"] = np.sin(np.deg2rad(df["wdir"]))
-    df["wdir_cos"] = np.cos(np.deg2rad(df["wdir"]))
-    df = df.drop(columns=["wdir"])
+    if "wdir" in df.columns:
+        # Fill missing wdir with 0 before converting (produces sin=0, cos=1 = "no direction")
+        wdir = df["wdir"].fillna(0).astype(np.float64)
+        df["wdir_sin"] = np.sin(np.deg2rad(wdir))
+        df["wdir_cos"] = np.cos(np.deg2rad(wdir))
+        df = df.drop(columns=["wdir"])
+    else:
+        df["wdir_sin"] = 0.0
+        df["wdir_cos"] = 1.0
     df = df.dropna()
+    # Convert nullable pandas dtypes (e.g. Float64, Int64) to numpy float64
+    for col in df.columns:
+        if hasattr(df[col].dtype, "numpy_dtype"):
+            df[col] = df[col].astype(np.float64)
     return df
 
 

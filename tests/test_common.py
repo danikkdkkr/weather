@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
 from data_pipeline import (
     TARGET_COLS,
@@ -11,8 +12,11 @@ from data_pipeline import (
     process_station_df,
     train_test_split,
 )
-from dataset import SequenceDataset
+from dataset import Params, SequenceDataset, build_loaders
 from stations import destination_point, generate_ring_coords, haversine
+from training import evaluate_full_test, predict_and_compare, run_training
+from weather_LSTM import LSTMModel
+from weather_transformer import TransformerModel
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +108,7 @@ class TestInverseTransform:
         recovered = inverse_transform_cols(scaler, subset_scaled)
         original = df[scaled_cols]
         for c in scaled_cols:
-            np.testing.assert_allclose(recovered[c].values, original[c].values, atol=1e-5)
+            np.testing.assert_allclose(recovered[c].values, original[c].values, atol=1e-5)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -244,3 +248,150 @@ class TestGenerateRingCoords:
             d = haversine(coords[i][0], coords[i][1], coords[j][0], coords[j][1])
             dists_between.append(d)
         assert max(dists_between) / min(dists_between) < 1.15
+
+
+# ---------------------------------------------------------------------------
+# Helpers for end-to-end model tests
+# ---------------------------------------------------------------------------
+
+def _make_processed_df(n_days: int = 500) -> pd.DataFrame:
+    """Synthetic DataFrame already in TARGET_COLS format (post-processing)."""
+    rng = np.random.RandomState(99)
+    dates = pd.date_range("2010-01-01", periods=n_days, freq="D")
+    doy = dates.dayofyear
+    # Create realistic-ish patterns so models can learn something
+    df = pd.DataFrame({
+        "tavg": 10 + 10 * np.sin(2 * np.pi * doy / 365) + rng.normal(0, 2, n_days),
+        "tmin": 5 + 8 * np.sin(2 * np.pi * doy / 365) + rng.normal(0, 2, n_days),
+        "tmax": 15 + 12 * np.sin(2 * np.pi * doy / 365) + rng.normal(0, 2, n_days),
+        "prcp": np.abs(rng.normal(2, 3, n_days)),
+        "snow": np.where(10 + 10 * np.sin(2 * np.pi * doy / 365) < 2,
+                         np.abs(rng.normal(1, 2, n_days)), 0.0),
+        "wdir_sin": np.sin(rng.uniform(0, 2 * np.pi, n_days)),
+        "wdir_cos": np.cos(rng.uniform(0, 2 * np.pi, n_days)),
+        "wspd": np.abs(rng.normal(15, 5, n_days)),
+        "wpgt": np.abs(rng.normal(30, 10, n_days)),
+        "pres": 1013 + rng.normal(0, 5, n_days),
+        "tsun": np.abs(200 + 150 * np.sin(2 * np.pi * doy / 365) + rng.normal(0, 40, n_days)),
+        "day_sin": np.sin(2 * np.pi * doy / 365),
+        "day_cos": np.cos(2 * np.pi * doy / 365),
+    }, index=dates)
+    return df
+
+
+# ---------------------------------------------------------------------------
+# End-to-end LSTM training + validation
+# ---------------------------------------------------------------------------
+
+class TestLSTMEndToEnd:
+    """Train an LSTM on synthetic data and validate predictions."""
+
+    def test_train_and_evaluate(self, tmp_path):
+        df = _make_processed_df()
+        df_scaled, scaler = normalize(df)
+
+        params = Params(seq_len=30, horizon=3, hidden_dim=16, num_layers=1, lr=1e-3, dropout=0.0)
+        train_loader, test_loader = build_loaders(df_scaled, params)
+        n_features = df_scaled.shape[1]
+        output_dim = len(TARGET_COLS)
+
+        model = LSTMModel(
+            input_dim=n_features,
+            hidden_dim=params.hidden_dim,
+            num_layers=params.num_layers,
+            dropout=params.dropout,
+            output_dim=output_dim,
+            horizon=params.horizon,
+        )
+
+        checkpoint = str(tmp_path / "best_model.pt")
+        best_val = run_training(
+            model, train_loader, test_loader,
+            lr=params.lr, max_epochs=50, patience=10,
+            checkpoint_path=checkpoint,
+        )
+
+        assert best_val < 1.0, f"Validation loss too high: {best_val}"
+
+        model.load_state_dict(torch.load(checkpoint, weights_only=True))
+        model.eval()
+
+        maes = evaluate_full_test(model, scaler, test_loader)
+        assert len(maes) == output_dim
+        for col, mae in maes.items():
+            assert mae >= 0, f"{col} MAE is negative"
+            assert np.isfinite(mae), f"{col} MAE is not finite"
+
+    def test_predict_and_compare(self, tmp_path):
+        df = _make_processed_df()
+        df_scaled, scaler = normalize(df)
+
+        params = Params(seq_len=30, horizon=3, hidden_dim=16, num_layers=1, lr=1e-3, dropout=0.0)
+        train_loader, test_loader = build_loaders(df_scaled, params)
+
+        model = LSTMModel(
+            input_dim=df_scaled.shape[1],
+            hidden_dim=params.hidden_dim,
+            num_layers=params.num_layers,
+            dropout=params.dropout,
+            output_dim=len(TARGET_COLS),
+            horizon=params.horizon,
+        )
+
+        checkpoint = str(tmp_path / "best_model.pt")
+        run_training(
+            model, train_loader, test_loader,
+            lr=params.lr, max_epochs=20, patience=5,
+            checkpoint_path=checkpoint,
+        )
+        model.load_state_dict(torch.load(checkpoint, weights_only=True))
+
+        maes = predict_and_compare(model, scaler, test_loader, params, verbose=False)
+        assert len(maes) == len(TARGET_COLS)
+        for col, mae in maes.items():
+            assert np.isfinite(mae), f"{col} MAE is not finite"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end Transformer training + validation
+# ---------------------------------------------------------------------------
+
+class TestTransformerEndToEnd:
+    """Train a Transformer on synthetic data and validate predictions."""
+
+    def test_train_and_evaluate(self, tmp_path):
+        df = _make_processed_df()
+        df_scaled, scaler = normalize(df)
+
+        params = Params(seq_len=30, horizon=3, hidden_dim=16, num_layers=1, lr=1e-3, dropout=0.1)
+        train_loader, test_loader = build_loaders(df_scaled, params)
+        n_features = df_scaled.shape[1]
+        output_dim = len(TARGET_COLS)
+
+        model = TransformerModel(
+            input_dim=n_features,
+            d_model=params.hidden_dim,
+            nhead=4,
+            num_layers=params.num_layers,
+            dropout=params.dropout,
+            output_dim=output_dim,
+            horizon=params.horizon,
+        )
+
+        checkpoint = str(tmp_path / "best_model.pt")
+        best_val = run_training(
+            model, train_loader, test_loader,
+            lr=params.lr, max_epochs=50, patience=10,
+            checkpoint_path=checkpoint,
+        )
+
+        assert best_val < 1.0, f"Validation loss too high: {best_val}"
+
+        model.load_state_dict(torch.load(checkpoint, weights_only=True))
+        model.eval()
+
+        maes = evaluate_full_test(model, scaler, test_loader)
+        assert len(maes) == output_dim
+        for col, mae in maes.items():
+            assert mae >= 0, f"{col} MAE is negative"
+            assert np.isfinite(mae), f"{col} MAE is not finite"

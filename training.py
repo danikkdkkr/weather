@@ -128,9 +128,8 @@ def predict_and_compare(
         print("\n--- Prediction vs True (last sample) ---")
         for i, name in enumerate(target_cols):
             for h in range(params.horizon):
-                p = inv_pred.iloc[h, i]
-                t = inv_true.iloc[h, i]
-                assert isinstance(p, (int, float)) and isinstance(t, (int, float))
+                p = float(inv_pred.iloc[h, i])
+                t = float(inv_true.iloc[h, i])
                 print(
                     f"Day +{h+1:>2}: {name:<10s} | "
                     f"Pred: {p:8.3f} | True: {t:8.3f} | Diff: {p-t:+8.3f}"
