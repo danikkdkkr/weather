@@ -138,7 +138,7 @@ def plot_error_by_horizon(
     fig, axes = plt.subplots(3, 4, figsize=(20, 12))
     axes = axes.flatten()
 
-    colors = plt.cm.Set2(np.linspace(0, 1, H))
+    colors = plt.get_cmap("Set2")(np.linspace(0, 1, H))
 
     for i, col in enumerate(target_cols):
         ax = axes[i]

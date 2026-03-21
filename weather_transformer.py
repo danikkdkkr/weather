@@ -58,16 +58,18 @@ class RevIN(nn.Module):
         mean = x.mean(dim=1, keepdim=True)               # (B, 1, C)
         std = x.std(dim=1, keepdim=True, unbiased=False) + self.eps  # (B, 1, C)
         x = (x - mean) / std
-        if self.weight is not None:
-            x = x * self.weight + self.bias
+        weight, bias = self.weight, self.bias
+        if weight is not None and bias is not None:
+            x = x * weight + bias
         return x, (mean, std)
 
     def denormalize(
         self, x: torch.Tensor, mean: torch.Tensor, std: torch.Tensor
     ) -> torch.Tensor:
         """x: (B, H, C) → denormalised back to MinMaxScaler space."""
-        if self.weight is not None:
-            x = (x - self.bias) / (self.weight + self.eps)
+        weight, bias = self.weight, self.bias
+        if weight is not None and bias is not None:
+            x = (x - bias) / (weight + self.eps)
         return x * std + mean
 
 

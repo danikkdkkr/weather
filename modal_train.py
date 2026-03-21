@@ -94,14 +94,13 @@ def train_lstm(
     from training import evaluate_full_test, run_training
     from weather_LSTM import LSTMModel
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {device}")
+    print(f"Device: {'cuda' if torch.cuda.is_available() else 'cpu'}")
 
     from datetime import datetime
     start = datetime(1970, 1, 1)
     end = datetime(2024, 12, 31)
 
-    df_scaled, scaler, primary, aux = prepare_data(
+    df_scaled, scaler, _, aux = prepare_data(
         target_lat, target_lon, start, end,
         max_radius_km=max_radius_km,
         n_rings=n_rings,
@@ -169,7 +168,6 @@ def train_lstm(
     out_dir = f"{RESULTS_DIR}/lstm"
     os.makedirs(out_dir, exist_ok=True)
 
-    import shutil
     import joblib
     torch.save(model.state_dict(), f"{out_dir}/best_model.pt")
     joblib.dump(scaler, f"{out_dir}/scaler.pkl")
@@ -226,14 +224,13 @@ def train_transformer(
     from training import evaluate_full_test, run_training
     from weather_transformer import TransformerModel
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {device}")
+    print(f"Device: {'cuda' if torch.cuda.is_available() else 'cpu'}")
 
     from datetime import datetime
     start = datetime(1970, 1, 1)
     end = datetime(2024, 12, 31)
 
-    df_scaled, scaler, primary, aux = prepare_data(
+    df_scaled, scaler, _, aux = prepare_data(
         target_lat, target_lon, start, end,
         max_radius_km=max_radius_km,
         n_rings=n_rings,
@@ -367,7 +364,7 @@ def main(
         print("=" * 60)
         print("  Training LSTM on Modal")
         print("=" * 60)
-        result = train_lstm.remote(
+        result = train_lstm.remote(  # type: ignore[union-attr]
             target_lat=lat, target_lon=lon,
             max_radius_km=max_radius,
             n_rings=n_rings, n_segments=n_segments,
@@ -381,7 +378,7 @@ def main(
         print("=" * 60)
         print("  Training Transformer on Modal")
         print("=" * 60)
-        result = train_transformer.remote(
+        result = train_transformer.remote(  # type: ignore[union-attr]
             target_lat=lat, target_lon=lon,
             max_radius_km=max_radius,
             n_rings=n_rings, n_segments=n_segments,
