@@ -7,9 +7,9 @@ Ask the user:
 
 Then:
 - Describe the recommended fetch/cache strategy (API vs local files) for that source
-- Show how to extend `process_station_df()` in `weather_common.py` to incorporate the new features
-- Show how to update `normalize()` to handle any new columns (add to skip_cols if already normalised, otherwise include in scaling)
+- Show how to extend `process_station_df()` in `data_pipeline.py` to incorporate the new features
+- Show how to update `normalize()` in `data_pipeline.py` to handle any new columns (add to skip_cols if already normalised, otherwise include in scaling)
 - Remind the user that the **target columns and their order remain fixed** — new sources add input features only
-- For multi-station data: the ring+segment search (`WeatherStation.find_nearby`) already handles station discovery; new sources should integrate into `fetch_multi_station_data()`
+- For multi-station data: the ring+segment search (`WeatherStation.find_nearby` in `stations.py`) already handles station discovery; new sources should integrate into `fetch_multi_station_data()` in `data_pipeline.py`
 
 Follow the conventions in CLAUDE.md.

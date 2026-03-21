@@ -1,2 +1,2 @@
 # Weather
-AI to forecast weather in Stuttgart
+PyTorch deep learning to forecast weather at any location

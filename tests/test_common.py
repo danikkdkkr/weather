@@ -1,23 +1,18 @@
-"""Unit tests for weather_common — no network calls, uses synthetic data."""
+"""Unit tests for the shared pipeline — no network calls, uses synthetic data."""
 
 import numpy as np
 import pandas as pd
 import pytest
-import torch
-from sklearn.preprocessing import MinMaxScaler
 
-from weather_common import (
+from data_pipeline import (
     TARGET_COLS,
-    Params,
-    SequenceDataset,
-    _destination_point,
-    _generate_ring_coords,
-    _haversine,
     inverse_transform_cols,
     normalize,
     process_station_df,
     train_test_split,
 )
+from dataset import SequenceDataset
+from stations import destination_point, generate_ring_coords, haversine
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +148,6 @@ class TestSequenceDataset:
     def test_no_overlap_with_step(self):
         ds = SequenceDataset(np.random.randn(100, 11), seq_len=10, horizon=1, step=10)
         assert len(ds) > 0
-        # Check items don't raise
         for i in range(len(ds)):
             x, y = ds[i]
             assert x.shape[0] == 10
@@ -164,93 +158,89 @@ class TestSequenceDataset:
 
 
 # ---------------------------------------------------------------------------
-# _haversine
+# haversine
 # ---------------------------------------------------------------------------
 
 class TestHaversine:
     def test_zero_distance(self):
-        assert _haversine(48.78, 9.18, 48.78, 9.18) == pytest.approx(0.0, abs=1e-6)
+        assert haversine(48.78, 9.18, 48.78, 9.18) == pytest.approx(0.0, abs=1e-6)
 
     def test_known_distance(self):
-        # Stuttgart to Munich ≈ 190 km
-        dist = _haversine(48.78, 9.18, 48.14, 11.58)
+        # Stuttgart to Munich ~ 190 km
+        dist = haversine(48.78, 9.18, 48.14, 11.58)
         assert 170 < dist < 220
 
     def test_vectorised(self):
         lats = np.array([48.78, 48.14])
         lons = np.array([9.18, 11.58])
-        dists = _haversine(48.78, 9.18, lats, lons)
+        dists = haversine(48.78, 9.18, lats, lons)
         assert dists[0] == pytest.approx(0.0, abs=1e-6)
         assert 170 < dists[1] < 220
 
 
 # ---------------------------------------------------------------------------
-# _destination_point
+# destination_point
 # ---------------------------------------------------------------------------
 
 class TestDestinationPoint:
     def test_north(self):
         """Moving 100 km north from Stuttgart should increase latitude."""
-        lat, lon = _destination_point(48.78, 9.18, 100.0, 0.0)  # bearing 0 = north
+        lat, lon = destination_point(48.78, 9.18, 100.0, 0.0)
         assert lat > 48.78
         assert lon == pytest.approx(9.18, abs=0.01)
 
     def test_east(self):
         """Moving east should increase longitude."""
-        lat, lon = _destination_point(48.78, 9.18, 100.0, np.pi / 2)
+        lat, lon = destination_point(48.78, 9.18, 100.0, np.pi / 2)
         assert lon > 9.18
         assert lat == pytest.approx(48.78, abs=0.2)
 
     def test_zero_distance(self):
-        lat, lon = _destination_point(48.78, 9.18, 0.0, 0.0)
+        lat, lon = destination_point(48.78, 9.18, 0.0, 0.0)
         assert lat == pytest.approx(48.78, abs=1e-6)
         assert lon == pytest.approx(9.18, abs=1e-6)
 
     def test_roundtrip_distance(self):
         """Destination at distance d should be ~d km away from origin."""
         d_km = 50.0
-        lat2, lon2 = _destination_point(48.78, 9.18, d_km, np.pi / 4)
-        actual = _haversine(48.78, 9.18, lat2, lon2)
+        lat2, lon2 = destination_point(48.78, 9.18, d_km, np.pi / 4)
+        actual = haversine(48.78, 9.18, lat2, lon2)
         assert actual == pytest.approx(d_km, rel=0.01)
 
 
 # ---------------------------------------------------------------------------
-# _generate_ring_coords
+# generate_ring_coords
 # ---------------------------------------------------------------------------
 
 class TestGenerateRingCoords:
     def test_count(self):
         """n_rings * n_segments coordinates should be generated."""
-        coords = _generate_ring_coords(48.78, 9.18, 100, n_rings=3, n_segments=4)
+        coords = generate_ring_coords(48.78, 9.18, 100, n_rings=3, n_segments=4)
         assert len(coords) == 3 * 4
 
     def test_zero_rings(self):
-        coords = _generate_ring_coords(48.78, 9.18, 100, n_rings=0, n_segments=4)
+        coords = generate_ring_coords(48.78, 9.18, 100, n_rings=0, n_segments=4)
         assert len(coords) == 0
 
     def test_distances_increase_per_ring(self):
         """Points on outer rings should be farther from centre."""
-        coords = _generate_ring_coords(48.78, 9.18, 90, n_rings=3, n_segments=4)
-        # Group by ring (first 4 = ring 1, next 4 = ring 2, etc.)
+        coords = generate_ring_coords(48.78, 9.18, 90, n_rings=3, n_segments=4)
         for ring in range(3):
             ring_coords = coords[ring * 4 : (ring + 1) * 4]
             for lat, lon in ring_coords:
-                dist = _haversine(48.78, 9.18, lat, lon)
+                dist = haversine(48.78, 9.18, lat, lon)
                 expected = 90 * (ring + 1) / 3
                 assert dist == pytest.approx(expected, rel=0.02)
 
     def test_segments_evenly_spaced(self):
-        """4 segments should produce points at ~90° apart."""
-        coords = _generate_ring_coords(48.78, 9.18, 50, n_rings=1, n_segments=4)
-        # All 4 points should be at ~50 km
+        """4 segments should produce points at ~90 deg apart."""
+        coords = generate_ring_coords(48.78, 9.18, 50, n_rings=1, n_segments=4)
         for lat, lon in coords:
-            dist = _haversine(48.78, 9.18, lat, lon)
+            dist = haversine(48.78, 9.18, lat, lon)
             assert dist == pytest.approx(50, rel=0.02)
-        # Check angular separation: adjacent points should be roughly equidistant
         dists_between = []
         for i in range(4):
             j = (i + 1) % 4
-            d = _haversine(coords[i][0], coords[i][1], coords[j][0], coords[j][1])
+            d = haversine(coords[i][0], coords[i][1], coords[j][0], coords[j][1])
             dists_between.append(d)
-        # All inter-point distances should be similar
         assert max(dists_between) / min(dists_between) < 1.15

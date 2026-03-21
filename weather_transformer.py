@@ -6,15 +6,9 @@ import torch
 import torch.nn as nn
 import math
 
-from weather_common import (
-    TARGET_COLS,
-    Params,
-    build_loaders,
-    evaluate_full_test,
-    predict_and_compare,
-    prepare_data,
-    run_training,
-)
+from data_pipeline import TARGET_COLS, prepare_data
+from dataset import Params, build_loaders
+from training import evaluate_full_test, predict_and_compare, run_training
 
 
 class PositionalEncoding(nn.Module):
@@ -67,7 +61,7 @@ def run_transformer(
     n_segments: int = 4,
     sanity_test: bool = True,
 ):
-    """Full Transformer pipeline: data fetch → train → evaluate."""
+    """Full Transformer pipeline: data fetch -> train -> evaluate."""
 
     start = datetime(1970, 1, 1)
     end = datetime(2024, 12, 31)
@@ -94,7 +88,7 @@ def run_transformer(
 
     train_loader, test_loader = build_loaders(df_scaled, params)
 
-    # nhead must divide d_model; pick largest power-of-2 ≤ 8 that divides
+    # nhead must divide d_model; pick largest power-of-2 <= 8 that divides
     d_model = params.hidden_dim
     nhead = min(8, d_model)
     while d_model % nhead != 0:

@@ -10,27 +10,42 @@ Models predict 11 meteorological variables 3 days ahead using a 30-day sliding w
 ## Repository Layout
 
 ```
-weather_common.py       — Shared pipeline (ALL non-model code lives here).
-weather_LSTM.py         — LSTM model class + run_lstm(). Imports from weather_common.
-weather_transformer.py  — Transformer model class + run_transformer(). Imports from weather_common.
+stations.py             — WeatherStation class + geo helpers (haversine, ring coords).
+data_pipeline.py        — Data fetch, feature engineering, normalization, splitting.
+dataset.py              — SequenceDataset, Params, build_loaders, hyperparameter_grid.
+training.py             — Training loop, prediction, evaluation.
+weather_common.py       — Re-export facade (backward compat only — do not add new code here).
+weather_LSTM.py         — LSTM model class + run_lstm().
+weather_transformer.py  — Transformer model class + run_transformer().
 tests/test_common.py    — Unit tests (synthetic data, no API calls).
 tests/test_forecasting.py — Integration tests (Meteostat API, real training).
 ```
 
+## Where to Put New Code
+
+| Code type | File |
+|---|---|
+| Station discovery, geo math | `stations.py` |
+| Data fetching, feature engineering, normalization | `data_pipeline.py` |
+| Dataset, loaders, hyperparameter utilities | `dataset.py` |
+| Training loop, evaluation, prediction | `training.py` |
+| New model architecture | `weather_<name>.py` (imports from the modules above) |
+| Backward-compat re-exports only | `weather_common.py` |
+
 ## Multi-Station Ring+Segment Search
 
-The `WeatherStation.find_nearby(max_radius_km, n_rings, n_segments)` method generates
-coordinate sample points on `n_rings` concentric circles with `n_segments` angular
-positions each, then finds the nearest Meteostat station to each point.
+`WeatherStation.find_nearby(max_radius_km, n_rings, n_segments)` generates coordinate
+sample points on `n_rings` concentric circles with `n_segments` angular positions each,
+then finds the nearest Meteostat station to each point.
 
 - `n_rings=0` → no auxiliaries (primary station only)
 - `max_radius_km` clamped to 0–1000
 
 ## Coding Standards
 
-- Python 3.12+, PyTorch >= 2.0
+- Python 3.12+, PyTorch >= 2.0, meteostat < 2.0
 - Model classes inherit `nn.Module`; `forward(x)`: `(B, seq_len, n_features)` → `(B, horizon, output_dim)`
-- All shared code (pipeline, training, evaluation) lives in `weather_common.py`
+- Import from individual modules (`stations`, `data_pipeline`, `dataset`, `training`), not from `weather_common`
 - Model files only contain the model class + a `run_<name>()` function
 - Use `joblib` for scaler serialisation; `torch.save(model.state_dict(), path)` for checkpoints
 

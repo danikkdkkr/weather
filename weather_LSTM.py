@@ -5,16 +5,9 @@ from datetime import datetime
 import torch
 import torch.nn as nn
 
-from weather_common import (
-    TARGET_COLS,
-    Params,
-    build_loaders,
-    evaluate_full_test,
-    hyperparameter_grid,
-    predict_and_compare,
-    prepare_data,
-    run_training,
-)
+from data_pipeline import TARGET_COLS, prepare_data
+from dataset import build_loaders, hyperparameter_grid
+from training import evaluate_full_test, predict_and_compare, run_training
 
 
 class LSTMModel(nn.Module):
@@ -50,7 +43,7 @@ def run_lstm(
     n_segments: int = 4,
     sanity_test: bool = True,
 ):
-    """Full LSTM pipeline: data fetch → grid search → best model evaluation."""
+    """Full LSTM pipeline: data fetch -> grid search -> best model evaluation."""
 
     start = datetime(1970, 1, 1)
     end = datetime(2024, 12, 31)

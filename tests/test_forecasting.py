@@ -7,14 +7,9 @@ Mark with -m integration and skip with: pytest -m "not integration"
 import pytest
 import torch
 
-from weather_common import (
-    TARGET_COLS,
-    Params,
-    build_loaders,
-    evaluate_full_test,
-    prepare_data,
-    run_training,
-)
+from data_pipeline import TARGET_COLS, prepare_data
+from dataset import Params, build_loaders
+from training import evaluate_full_test, run_training
 from weather_LSTM import LSTMModel
 from weather_transformer import TransformerModel
 
@@ -38,7 +33,7 @@ _TARGETS = {
 # Acceptable MAE thresholds per variable (in original units).
 # These are generous — just checking the model produces something reasonable, not SOTA.
 _MAE_THRESHOLDS = {
-    "tavg": 8.0,   # °C
+    "tavg": 8.0,   # deg C
     "tmin": 8.0,
     "tmax": 8.0,
     "prcp": 6.0,   # mm

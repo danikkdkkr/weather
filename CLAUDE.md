@@ -9,11 +9,18 @@ Data: Meteostat daily station observations, 1970-2024.
 ## Repository Layout
 
 ```
-weather_common.py       — Shared pipeline: WeatherStation, SequenceDataset, Params,
-                          data fetching, ring+segment station search, scaling,
-                          training loop, prediction, evaluation.
-weather_LSTM.py         — LSTM with hyperparameter grid search. Mature, working.
-weather_transformer.py  — Transformer architecture. Uses shared pipeline.
+stations.py             — WeatherStation class, haversine, ring+segment coordinate generation.
+data_pipeline.py        — Data fetching, feature engineering (wdir→sin/cos, snow NaN→0),
+                          normalization (MinMaxScaler), inverse transform, train/test split,
+                          prepare_data() convenience function.
+dataset.py              — SequenceDataset (sliding window), Params, build_loaders,
+                          hyperparameter_grid.
+training.py             — run_training (early stopping), predict_and_compare,
+                          evaluate_full_test.
+weather_common.py       — Re-export facade: imports & re-exports everything from the four
+                          modules above for backward compatibility.
+weather_LSTM.py         — LSTM model class + run_lstm(). Imports from individual modules.
+weather_transformer.py  — Transformer model class + run_transformer(). Imports from individual modules.
 tests/test_common.py    — Unit tests (synthetic data, no API calls).
 tests/test_forecasting.py — Integration tests (Meteostat API, real training).
 ```
@@ -65,7 +72,8 @@ Positional order matters: inverse-transform logic relies on it.
 - Model classes: `nn.Module` subclasses, `forward()` takes `(B, seq_len, n_features)` → `(B, horizon, output_dim)`.
 - Dataset: `SequenceDataset(Dataset)` — sliding window over a scaled DataFrame/ndarray.
 - Preprocessing in standalone functions (not inside classes) — keeps them reusable across model files.
-- Model files import shared pipeline from `weather_common.py`, only define the model class + `run_<name>()`.
+- Model files import from individual modules (`data_pipeline`, `dataset`, `training`), not from `weather_common.py`.
+- `weather_common.py` exists only as a backward-compatible re-export facade.
 - Serialise scalers with `joblib`; save model checkpoints with `torch.save(model.state_dict(), path)`.
 - Do not use `sklearn.model_selection.train_test_split` — use the custom time-ordered split to prevent leakage.
 
@@ -81,7 +89,7 @@ pytest -m integration tests/    # Integration tests (Meteostat API, slow)
 ## Dependencies
 
 ```
-torch  meteostat  pandas  numpy  scikit-learn  matplotlib  joblib  pytest
+torch  meteostat (<2.0)  pandas  numpy  scikit-learn  matplotlib  joblib  pytest
 ```
 
 ## Do Not Commit
