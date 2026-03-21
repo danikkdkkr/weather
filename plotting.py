@@ -54,9 +54,10 @@ def collect_errors(
     pred_df = pd.DataFrame(preds_flat, columns=target_cols)
     true_df = pd.DataFrame(trues_flat, columns=target_cols)
 
-    scaled_cols = list(scaler.feature_names_in_)
+    scaled_cols: list[str] = list(scaler.feature_names_in_)  # type: ignore[attr-defined]
     for df in (pred_df, true_df):
-        sub = df[[c for c in target_cols if c in scaled_cols]].copy()
+        cols = [c for c in target_cols if c in scaled_cols]
+        sub = pd.DataFrame(df[cols].copy())
         inv = inverse_transform_cols(scaler, sub)
         for c in inv.columns:
             df[c] = inv[c]

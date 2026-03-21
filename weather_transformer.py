@@ -325,13 +325,13 @@ def run_transformer(
 
     model = TransformerModel(
         input_dim=n_features,
-        d_model=cfg["d_model"],
-        nhead=cfg["nhead"],
-        num_layers=cfg["num_layers"],
+        d_model=int(cfg["d_model"]),
+        nhead=int(cfg["nhead"]),
+        num_layers=int(cfg["num_layers"]),
         dropout=cfg["dropout"],
         output_dim=output_dim,
         horizon=horizon,
-        patch_size=cfg["patch_size"],
+        patch_size=int(cfg["patch_size"]),
         seq_len=seq_len,
     )
 
