@@ -1,0 +1,8 @@
+torch
+meteostat<2.0
+pandas
+numpy
+scikit-learn
+matplotlib
+joblib
+pytest

@@ -4,6 +4,7 @@
 # Model artefacts (runtime only)
 *.pt
 *.pkl
+results/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
