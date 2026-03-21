@@ -4,10 +4,12 @@ Contains: run_training, predict_and_compare, evaluate_full_test.
 """
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.preprocessing import MinMaxScaler
+from torch.optim.adam import Adam
 from torch.utils.data import DataLoader
 
 from data_pipeline import TARGET_COLS, inverse_transform_cols
@@ -26,11 +28,11 @@ def run_training(
 ) -> float:
     """Train with early stopping.  Returns best validation loss."""
     criterion = nn.L1Loss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = Adam(model.parameters(), lr=lr)
     best_val = float("inf")
     trigger = 0
 
-    for epoch in range(max_epochs):
+    for _epoch in range(max_epochs):
         # --- train ---
         model.train()
         train_loss = 0.0
@@ -81,9 +83,14 @@ def predict_and_compare(
         target_cols = TARGET_COLS
 
     model.eval()
+    y_hat = None
+    y = None
     with torch.no_grad():
         for X, y in test_loader:
             y_hat = model(X)
+
+    if y_hat is None or y is None:
+        return {}
 
     y_hat_np = y_hat[-1].cpu().numpy()
     y_true_np = y[-1].cpu().numpy()
@@ -113,7 +120,9 @@ def predict_and_compare(
     # Per-variable MAE
     maes: dict[str, float] = {}
     for col in target_cols:
-        maes[col] = float(np.abs(inv_pred[col].values - inv_true[col].values).mean())
+        pred_vals: npt.NDArray[np.floating] = np.asarray(inv_pred[col].values, dtype=np.float64)
+        true_vals: npt.NDArray[np.floating] = np.asarray(inv_true[col].values, dtype=np.float64)
+        maes[col] = float(np.abs(pred_vals - true_vals).mean())
 
     if verbose:
         print("\n--- Prediction vs True (last sample) ---")
@@ -121,6 +130,7 @@ def predict_and_compare(
             for h in range(params.horizon):
                 p = inv_pred.iloc[h, i]
                 t = inv_true.iloc[h, i]
+                assert isinstance(p, (int, float)) and isinstance(t, (int, float))
                 print(
                     f"Day +{h+1:>2}: {name:<10s} | "
                     f"Pred: {p:8.3f} | True: {t:8.3f} | Diff: {p-t:+8.3f}"
@@ -153,7 +163,7 @@ def evaluate_full_test(
     trues = np.concatenate(all_trues, axis=0)
 
     # Flatten horizon dimension for inverse transform
-    N, H, D = preds.shape
+    *_, D = preds.shape
     preds_flat = preds.reshape(-1, D)
     trues_flat = trues.reshape(-1, D)
 
@@ -172,8 +182,10 @@ def evaluate_full_test(
             pred_df[col] = np.clip(pred_df[col], 0, None)
             pred_df.loc[pred_df[col] < 0.3, col] = 0.0
 
-    maes = {}
+    maes: dict[str, float] = {}
     for col in target_cols:
-        maes[col] = float(np.abs(pred_df[col].values - true_df[col].values).mean())
+        pred_vals: npt.NDArray[np.floating] = np.asarray(pred_df[col].values, dtype=np.float64)
+        true_vals: npt.NDArray[np.floating] = np.asarray(true_df[col].values, dtype=np.float64)
+        maes[col] = float(np.abs(pred_vals - true_vals).mean())
 
     return maes
