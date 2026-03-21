@@ -24,6 +24,7 @@ def run_training(
     max_epochs: int = 1000,
     patience: int = 30,
     checkpoint_path: str = "best_model.pt",
+    grad_clip: float | None = 1.0,
 ) -> float:
     """Train with early stopping.  Returns best validation loss."""
     criterion = nn.L1Loss()
@@ -41,6 +42,8 @@ def run_training(
             y_hat = model(X)
             loss = criterion(y_hat, y)
             loss.backward()
+            if grad_clip is not None:
+                nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
             train_loss += loss.item()
             n += 1
