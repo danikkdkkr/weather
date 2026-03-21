@@ -67,7 +67,7 @@ def fetch_multi_station_data(
         processed = process_station_df(raw).add_prefix(f"s{i}_")
         combined = combined.join(processed, how="inner")
 
-    doy = combined.index.dayofyear
+    doy = pd.DatetimeIndex(combined.index).dayofyear
     combined["day_sin"] = np.sin(2 * np.pi * doy / 365)
     combined["day_cos"] = np.cos(2 * np.pi * doy / 365)
 

@@ -4,7 +4,6 @@ Contains: run_training, predict_and_compare, evaluate_full_test.
 """
 
 import numpy as np
-import numpy.typing as npt
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -120,8 +119,8 @@ def predict_and_compare(
     # Per-variable MAE
     maes: dict[str, float] = {}
     for col in target_cols:
-        pred_vals: npt.NDArray[np.floating] = np.asarray(inv_pred[col].values, dtype=np.float64)
-        true_vals: npt.NDArray[np.floating] = np.asarray(inv_true[col].values, dtype=np.float64)
+        pred_vals = np.asarray(inv_pred[col].values, dtype=np.float64)
+        true_vals = np.asarray(inv_true[col].values, dtype=np.float64)
         maes[col] = float(np.abs(pred_vals - true_vals).mean())
 
     if verbose:
@@ -183,8 +182,8 @@ def evaluate_full_test(
 
     maes: dict[str, float] = {}
     for col in target_cols:
-        pred_vals: npt.NDArray[np.floating] = np.asarray(pred_df[col].values, dtype=np.float64)
-        true_vals: npt.NDArray[np.floating] = np.asarray(true_df[col].values, dtype=np.float64)
+        pred_vals = np.asarray(pred_df[col].values, dtype=np.float64)
+        true_vals = np.asarray(true_df[col].values, dtype=np.float64)
         maes[col] = float(np.abs(pred_vals - true_vals).mean())
 
     return maes
