@@ -1,3 +1,10 @@
+# IDE
+.vscode/
+
+# Model artefacts (runtime only)
+*.pt
+*.pkl
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
